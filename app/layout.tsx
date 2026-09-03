@@ -5,7 +5,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   metadataBase: getMetadataBase(),
-  title: "Ponside — Coming Soon",
+  title: "Ponside",
   description: "Ponside is coming soon.",
   applicationName: SITE_CONFIG.PROJECT_NAME,
   openGraph: {
