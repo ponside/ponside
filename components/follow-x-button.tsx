@@ -20,7 +20,7 @@ export function FollowXButton() {
       className="follow-button"
       href={SITE_CONFIG.X_URL}
       target="_blank"
-      rel="noreferrer"
+      rel="noopener noreferrer"
       aria-label="Follow Ponside on X"
     >
       <span className="button-sheen" aria-hidden="true" />

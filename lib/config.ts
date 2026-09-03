@@ -1,7 +1,7 @@
 export const SITE_CONFIG = {
   PROJECT_NAME: "Ponside",
   SITE_URL: "SITE_URL_HERE",
-  X_URL: "X_URL_HERE",
+  X_URL: "https://x.com/ponside",
   OG_IMAGE: "/og.png",
 } as const;
 
