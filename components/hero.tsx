@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import type { PointerEvent } from "react";
 import { AbstractBackground } from "@/components/abstract-background";
+import { EarlyAccessButton } from "@/components/early-access-button";
 import { FollowXButton } from "@/components/follow-x-button";
 
 const LETTERS = ["P", "O", "N", "S", "I", "D", "E"];
@@ -62,6 +63,7 @@ export function Hero() {
 
         <p className="coming-soon">Coming soon</p>
         <div className="cta-wrap">
+          <EarlyAccessButton />
           <FollowXButton />
         </div>
       </section>
