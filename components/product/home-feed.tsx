@@ -1,43 +1,30 @@
 "use client";
 
-import { useState } from "react";
-import type { Post } from "@/lib/mock-data";
-import { currentUser, posts } from "@/lib/mock-data";
-import { Icon } from "@/components/product/icons";
-import { Avatar, Button, Tabs } from "@/components/product/primitives";
+import { useMemo, useState } from "react";
+import type { SocialPost } from "@/lib/domain";
+import { apiRequest } from "@/lib/client/api";
+import { Avatar, Button, ServiceState, Tabs } from "@/components/product/primitives";
 import { PostCard } from "@/components/product/post-card";
+import { useProductAuth } from "@/components/product/product-providers";
+import { useApiResource } from "@/components/product/use-resource";
 
 export function HomeFeed() {
   const [tab, setTab] = useState("For You");
   const [copy, setCopy] = useState("");
-  const [focused, setFocused] = useState(false);
-  const [localPosts, setLocalPosts] = useState<Post[]>(posts);
-
-  function submitPost() {
-    const body = copy.trim();
-    if (!body) return;
-    setLocalPosts((items) => [{ id: `local-${Date.now()}`, userId: currentUser.id, body, timestamp: "now", kind: "thought", comments: 0, reposts: 0, likes: 0 }, ...items]);
-    setCopy("");
-    setFocused(false);
+  const [posting, setPosting] = useState(false);
+  const auth = useProductAuth();
+  const path = useMemo(() => `/api/feed?mode=${tab === "Following" ? "following" : "all"}`, [tab]);
+  const feed = useApiResource<{ posts: SocialPost[] }>(path);
+  async function submit() {
+    if (!auth.authenticated) { auth.login("create-post"); return; }
+    if (!copy.trim()) return;
+    setPosting(true);
+    try { const token = await auth.getToken(); await apiRequest("/api/posts", { method: "POST", body: JSON.stringify({ content: copy }) }, token); setCopy(""); await feed.refresh(); }
+    finally { setPosting(false); }
   }
-
-  const visiblePosts = tab === "Following" ? localPosts.filter((post) => ["ari", "maya", "you"].includes(post.userId)) : localPosts;
-
-  return (
-    <section className="ps-feed-column">
-      <header className="ps-page-header"><div><span className="ps-eyebrow">Your circle</span><h1>Home</h1></div><span className="ps-live-status"><i /> Markets live</span></header>
-      <Tabs tabs={["For You", "Following"]} active={tab} onChange={setTab} label="Home feed" />
-      <div className={`ps-composer${focused ? " is-focused" : ""}`}>
-        <Avatar user={currentUser} />
-        <div className="ps-composer-main">
-          <textarea value={copy} onChange={(event) => setCopy(event.target.value)} onFocus={() => setFocused(true)} onBlur={() => !copy && setFocused(false)} placeholder="What's moving?" aria-label="Create a post" rows={focused ? 3 : 1} />
-          <div className="ps-composer-footer">
-            <div><button type="button"><Icon name="image" />Image</button><button type="button"><Icon name="coin" />Token</button><button type="button"><Icon name="chart" />Position</button></div>
-            <Button type="button" disabled={!copy.trim()} onClick={submitPost}>Post</Button>
-          </div>
-        </div>
-      </div>
-      <div className="ps-feed" aria-live="polite">{visiblePosts.map((post) => <PostCard key={post.id} post={post} />)}</div>
-    </section>
-  );
+  function selectTab(value: string) {
+    if (value === "Following" && !auth.authenticated) { auth.login("following-feed"); return; }
+    setTab(value);
+  }
+  return <section className="ps-feed-column"><header className="ps-page-header"><div><span className="ps-eyebrow">Your circle</span><h1>Home</h1></div><span className="ps-live-status"><i /> Onchain markets</span></header><Tabs tabs={["For You", "Following"]} active={tab} onChange={selectTab} label="Home feed" /><div className="ps-composer"><Avatar user={auth.profile} /><div className="ps-composer-main"><textarea value={copy} onChange={(event) => setCopy(event.target.value)} placeholder={auth.authenticated ? "What's moving?" : "Sign in with X to post"} aria-label="Create a post" rows={2} disabled={!auth.configured} /><div className="ps-composer-footer"><span className="ps-form-hint">Posts are stored only after server-verified authentication.</span><Button type="button" disabled={posting || (auth.authenticated && !copy.trim()) || !auth.configured} onClick={() => void submit()}>{posting ? "Posting…" : auth.authenticated ? "Post" : "Sign in with X"}</Button></div></div></div>{feed.loading && <div className="ps-loading-list"><i /><i /><i /></div>}{feed.error && <ServiceState title="Feed unavailable" copy={feed.error} action={<button className="ps-text-button" onClick={() => void feed.refresh()}>Try again</button>} />}{!feed.loading && !feed.error && !feed.data?.posts.length && <ServiceState title="The feed is quiet" copy="Real posts will appear here as people join the conversation." />}{feed.data && <div className="ps-feed" aria-live="polite">{feed.data.posts.map((post) => <PostCard key={post.id} post={post} />)}</div>}</section>;
 }

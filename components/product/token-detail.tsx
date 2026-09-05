@@ -1,82 +1,63 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { Token } from "@/lib/mock-data";
-import { getUser, posts } from "@/lib/mock-data";
+import { useEffect, useMemo, useState } from "react";
+import { formatUnits } from "viem";
+import type { IndexedTrade, PreparedTransaction, SocialPost, TokenMarket } from "@/lib/domain";
+import { apiRequest } from "@/lib/client/api";
 import { Icon } from "@/components/product/icons";
+import { TokenLogo, formatTokenAmount } from "@/components/product/market-cards";
 import { PostCard } from "@/components/product/post-card";
-import { TokenLogo } from "@/components/product/market-cards";
-import { Button, FollowButton, Tabs, UserIdentity } from "@/components/product/primitives";
+import { Button, EmptyState, FollowButton, ServiceState, Tabs, UserIdentity } from "@/components/product/primitives";
+import { useProductAuth } from "@/components/product/product-providers";
+import { useApiResource } from "@/components/product/use-resource";
 
-const tradeStates = ["Preparing", "Simulating", "Ready", "Demo transaction complete"];
+type TokenPayload = { token: TokenMarket; trades: IndexedTrade[]; posts: SocialPost[] };
+type Quote = { amountIn: string; amountOut: string; minAmountOut: string; quoteSpent: string; quoteRefund: string; inputDecimals: number; outputDecimals: number; inputSymbol: string; outputSymbol: string };
+type Prepared = { quote: Quote; transactions: PreparedTransaction[]; requiresApproval: boolean };
+type Balance = { native: { formatted: string }; token: { formatted: string } | null; pair: { formatted: string } | null };
 
-function PriceChart({ token, range }: { token: Token; range: string }) {
-  const paths: Record<string, string> = {
-    "1H": "M0 198C42 191 58 206 91 177s59 5 91-15 45-35 83-26 50 16 90-13 54-9 90-42 61 2 95-28 67-12 110-44",
-    "4H": "M0 205C44 192 62 204 98 174s58-14 95-34 55 11 94-18 65-28 104-4 57-17 96-39 71-4 110-34",
-    "1D": "M0 216C48 202 62 190 108 194s43-49 92-35 66-1 102-30 57 9 104-35 71 16 112-28 62-1 92-35",
-    "1W": "M0 223C49 217 72 188 115 196s56-40 101-28 47-32 92-24 67 13 109-31 75-14 113-47 56-2 70-25",
-    ALL: "M0 230C42 228 64 212 101 215s56-22 94-19 60-45 104-31 61-1 98-35 70 2 115-51 55-3 68-32",
-  };
-  return (
-    <div className="ps-price-chart">
-      <div className="ps-chart-axis"><span>{token.price}</span><span>$0.00260</span><span>$0.00235</span><span>$0.00210</span></div>
-      <svg viewBox="0 0 720 270" role="img" aria-label={`${token.symbol} ${range} mock price chart`} preserveAspectRatio="none">
-        <defs><linearGradient id={`token-fill-${token.id}`} x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="#b4d105" stopOpacity=".22"/><stop offset="1" stopColor="#b4d105" stopOpacity="0"/></linearGradient></defs>
-        <g className="ps-chart-grid"><path d="M0 54h720M0 108h720M0 162h720M0 216h720"/><path d="M120 0v270M240 0v270M360 0v270M480 0v270M600 0v270"/></g>
-        <path className="ps-token-chart-fill" style={{ fill: `url(#token-fill-${token.id})` }} d={`${paths[range]}V270H0Z`} />
-        <path className="ps-token-chart-line" d={paths[range]} />
-        <circle cx="718" cy={range === "ALL" ? "38" : "34"} r="4" />
-      </svg>
-      <div className="ps-chart-times"><span>09:00</span><span>12:00</span><span>15:00</span><span>18:00</span><span>Now</span></div>
-    </div>
-  );
+function PriceChart({ token }: { token: TokenMarket }) {
+  const points = useMemo(() => {
+    if (token.chart.length < 2) return "";
+    const values = token.chart.map((item) => Number(formatUnits(BigInt(item.priceRaw), 18)));
+    const low = Math.min(...values); const high = Math.max(...values); const span = high - low || 1;
+    return values.map((value, index) => `${(index / (values.length - 1)) * 720},${240 - ((value - low) / span) * 200}`).join(" ");
+  }, [token.chart]);
+  if (!points) return <EmptyState title="Chart history unavailable" copy="Execution prices will appear after indexed onchain trades." />;
+  return <div className="ps-price-chart"><svg viewBox="0 0 720 270" role="img" aria-label={`${token.symbol} indexed execution price chart`} preserveAspectRatio="none"><g className="ps-chart-grid"><path d="M0 54h720M0 108h720M0 162h720M0 216h720" /><path d="M120 0v270M240 0v270M360 0v270M480 0v270M600 0v270" /></g><polyline className="ps-token-chart-line" points={points} fill="none" /></svg><p>{!token.marketDataFresh ? "Official Pons market refresh is currently stale; no current activity is inferred." : !token.activityWindowComplete ? `Real Pons market snapshots${token.activityCoverageStartedAt ? ` since ${new Date(token.activityCoverageStartedAt).toLocaleDateString()}` : ""}; historical coverage is still accumulating.` : "Official Pons market snapshots · indexed executions shown when available"}</p></div>;
 }
 
-function TradePanel({ token, mobile = false, onClose }: { token: Token; mobile?: boolean; onClose?: () => void }) {
-  const [side, setSide] = useState<"Buy" | "Sell">("Buy");
-  const [amount, setAmount] = useState("");
-  const [status, setStatus] = useState(-1);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  useEffect(() => () => timers.current.forEach(clearTimeout), []);
-  function simulate() {
-    if (!amount || status >= 0) return;
-    setStatus(0);
-    tradeStates.slice(1).forEach((_, index) => timers.current.push(setTimeout(() => setStatus(index + 1), (index + 1) * 600)));
+function TradePanel({ token, mobile = false, onClose }: { token: TokenMarket; mobile?: boolean; onClose?: () => void }) {
+  const auth = useProductAuth(); const [side, setSide] = useState<"buy" | "sell">("buy"); const [amount, setAmount] = useState(""); const [slippageBps, setSlippageBps] = useState(100); const [quote, setQuote] = useState<Quote | null>(null); const [error, setError] = useState<string | null>(null); const [status, setStatus] = useState("");
+  const balances = useApiResource<Balance>(auth.authenticated ? `/api/wallet/balances?token=${token.address}` : null, { requiresAuth: true });
+  useEffect(() => {
+    if (!auth.authenticated || !/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0 || token.phase !== 0) return;
+    const timer = setTimeout(async () => { try { setStatus("Quoting onchain state…"); const accessToken = await auth.getToken(); const next = await apiRequest<Quote>("/api/pons/quote", { method: "POST", body: JSON.stringify({ tokenAddress: token.address, side, amount, slippageBps }) }, accessToken); setQuote(next); setError(null); } catch (cause) { setQuote(null); setError(cause instanceof Error ? cause.message : "Quote failed."); } finally { setStatus(""); } }, 350);
+    return () => clearTimeout(timer);
+  }, [amount, side, slippageBps, token.address, token.phase, auth]);
+  async function trade() {
+    if (!auth.authenticated) { auth.login(`trade:${token.address}`); return; }
+    if (!quote) return;
+    try {
+      setError(null); setStatus("Simulating transaction…"); const accessToken = await auth.getToken();
+      let prepared = await apiRequest<Prepared>("/api/pons/trade/prepare", { method: "POST", body: JSON.stringify({ tokenAddress: token.address, side, amount, slippageBps }) }, accessToken);
+      if (prepared.requiresApproval) {
+        setStatus("Approve in your wallet…"); await auth.sendTransactions([prepared.transactions[0]]);
+        setStatus("Re-simulating trade…"); prepared = await apiRequest<Prepared>("/api/pons/trade/prepare", { method: "POST", body: JSON.stringify({ tokenAddress: token.address, side, amount, slippageBps }) }, accessToken);
+        if (prepared.requiresApproval) throw new Error("The token approval is not active yet. Please retry after the approval is visible onchain.");
+      }
+      setStatus("Confirm in your wallet…"); await auth.sendTransactions(prepared.transactions); setStatus("Transaction confirmed"); setAmount(""); setQuote(null); await balances.refresh();
+    } catch (cause) { setStatus(""); setError(cause instanceof Error ? cause.message : "Transaction failed."); }
   }
-  const receive = amount ? (Number(amount) / Number(token.price.replace("$", ""))).toLocaleString(undefined, { maximumFractionDigits: 0 }) : "0";
-  return (
-    <section className={`ps-trade-panel${mobile ? " is-mobile" : ""}`} aria-label={`${token.symbol} demo trade panel`}>
-      {mobile && <header><strong>Trade ${token.symbol}</strong><button className="ps-icon-button" type="button" onClick={onClose} aria-label="Close trade panel"><Icon name="close" /></button></header>}
-      <div className="ps-trade-tabs">{(["Buy", "Sell"] as const).map((item) => <button key={item} className={side === item ? "is-active" : ""} type="button" onClick={() => { setSide(item); setStatus(-1); }}>{item}</button>)}</div>
-      <label className="ps-trade-input"><span>You pay</span><div><input inputMode="decimal" value={amount} onChange={(event) => { setAmount(event.target.value.replace(/[^0-9.]/g, "")); setStatus(-1); }} placeholder="0.00" /><strong>ETH</strong></div><small>Demo balance 2.84 ETH</small></label>
-      <div className="ps-trade-switch"><Icon name="arrow" /></div>
-      <label className="ps-trade-input"><span>You receive</span><div><output>{receive}</output><strong>{token.symbol}</strong></div><small>Estimated · Mock quote</small></label>
-      <div className="ps-slippage"><span>Slippage</span><div>{["0.5%", "1%", "Auto"].map((value) => <button className={value === "Auto" ? "is-active" : ""} type="button" key={value}>{value}</button>)}</div></div>
-      {status >= 0 && <div className={`ps-trade-status${status === 3 ? " is-complete" : ""}`}><span>{status === 3 ? <Icon name="check" /> : <i />}</span><div><strong>{tradeStates[status]}</strong><small>{status === 3 ? "No transaction was sent." : "Frontend simulation in progress"}</small></div></div>}
-      <Button type="button" onClick={simulate} disabled={!amount || status >= 0}>{status === 3 ? "Complete" : status >= 0 ? tradeStates[status] : `${side} ${token.symbol}`}</Button>
-      <p>Demo interface only. No wallet or blockchain connection.</p>
-    </section>
-  );
+  const paySymbol = side === "buy" ? token.pairSymbol : token.symbol; const receiveSymbol = side === "buy" ? token.symbol : token.pairSymbol; const balance = side === "buy" ? (token.pairAddress === "0x0000000000000000000000000000000000000000" ? balances.data?.native.formatted : balances.data?.pair?.formatted) : balances.data?.token?.formatted;
+  if (token.phase !== 0) return <section className={`ps-trade-panel${mobile ? " is-mobile" : ""}`}><p>Trading integration for this graduated market is not available yet.</p>{mobile && <Button type="button" tone="secondary" onClick={onClose}>Close</Button>}</section>;
+  return <section className={`ps-trade-panel${mobile ? " is-mobile" : ""}`} aria-label={`${token.symbol} trade panel`}>{mobile && <header><strong>Trade ${token.symbol}</strong><button className="ps-icon-button" type="button" onClick={onClose} aria-label="Close trade panel"><Icon name="close" /></button></header>}<div className="ps-trade-tabs">{(["buy", "sell"] as const).map((item) => <button key={item} className={side === item ? "is-active" : ""} type="button" onClick={() => { setSide(item); setAmount(""); setQuote(null); }}>{item === "buy" ? "Buy" : "Sell"}</button>)}</div><label className="ps-trade-input"><span>You pay</span><div><input inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value.replace(/[^0-9.]/g, ""))} placeholder="0.00" /><strong>{paySymbol}</strong></div><small>{auth.authenticated ? balance === undefined ? "Reading wallet balance…" : `Balance ${Number(balance).toLocaleString(undefined, { maximumFractionDigits: 6 })} ${paySymbol}` : "Sign in to read your wallet balance"}</small></label><div className="ps-trade-switch"><Icon name="arrow" /></div><label className="ps-trade-input"><span>You receive (estimated)</span><div><output>{quote ? formatUnits(BigInt(quote.amountOut), quote.outputDecimals) : "0"}</output><strong>{receiveSymbol}</strong></div><small>Minimum after slippage: {quote ? formatUnits(BigInt(quote.minAmountOut), quote.outputDecimals) : "0"}</small>{quote && BigInt(quote.quoteRefund) > 0n && <small>Estimated refund: {formatUnits(BigInt(quote.quoteRefund), quote.inputDecimals)} {quote.inputSymbol}</small>}</label><div className="ps-slippage"><span>Slippage</span><div>{[[50, "0.5%"], [100, "1%"], [200, "2%"]].map(([value, label]) => <button className={slippageBps === value ? "is-active" : ""} type="button" key={value} onClick={() => setSlippageBps(Number(value))}>{label}</button>)}</div></div>{status && <div className={`ps-trade-status${status === "Transaction confirmed" ? " is-complete" : ""}`}><span>{status === "Transaction confirmed" ? <Icon name="check" /> : <i />}</span><div><strong>{status}</strong><small>{status === "Transaction confirmed" ? "Verified on Robinhood Chain" : "Do not close this panel"}</small></div></div>}{error && <p className="ps-form-error">{error}</p>}<Button type="button" onClick={() => void trade()} disabled={!auth.configured || (!quote && auth.authenticated) || Boolean(status && status !== "Transaction confirmed") || token.phase !== 0}>{token.phase !== 0 ? "Graduated market unavailable" : auth.authenticated ? `${side === "buy" ? "Buy" : "Sell"} ${token.symbol}` : "Sign in with X"}</Button><p>Transactions are simulated server-side, then signed by your wallet. They may be irreversible.</p></section>;
 }
 
-export function TokenDetail({ token }: { token: Token }) {
-  const [range, setRange] = useState("1D");
-  const [tab, setTab] = useState("Posts");
-  const [mobileTrade, setMobileTrade] = useState(false);
-  const creator = getUser(token.creatorId);
-  const tokenPosts = posts.filter((post) => post.tokenId === token.id || post.body.includes(`$${token.symbol}`));
-  return (
-    <section className="ps-view ps-token-view">
-      <header className="ps-token-header"><div className="ps-token-identity"><TokenLogo token={token} size="lg" /><div><span className="ps-eyebrow">{token.pairType}</span><h1>{token.name} <em>${token.symbol}</em></h1><p>{token.address.slice(0, 8)}…{token.address.slice(-6)}</p></div></div><FollowButton /><Button className="ps-mobile-trade-open" type="button" onClick={() => setMobileTrade(true)}>Trade</Button></header>
-      <div className="ps-token-context"><UserIdentity user={creator} compact /><span className="ps-context-divider" /><span><small>Pair</small><strong>{token.pair}</strong></span><span><small>Phase</small><strong className="is-positive">{token.phase}</strong></span></div>
-      <div className="ps-token-layout"><div className="ps-token-primary">
-        <section className="ps-metric-strip"><div><span>Price</span><strong>{token.price}</strong></div><div><span>Market Cap</span><strong>{token.marketCap}</strong></div><div><span>Volume</span><strong>{token.volume}</strong></div><div><span>24h</span><strong className={token.change >= 0 ? "is-positive" : "is-negative"}>{token.change >= 0 ? "+" : ""}{token.change}%</strong></div></section>
-        <section className="ps-bonding"><div><span>Bonding progress</span><strong>{token.bonding}%</strong></div><progress value={token.bonding} max="100">{token.bonding}%</progress></section>
-        <section className="ps-chart-panel"><header><div><span>Price</span><strong>{token.price} <em>+{token.change}%</em></strong></div><div>{["1H", "4H", "1D", "1W", "ALL"].map((item) => <button className={range === item ? "is-active" : ""} key={item} type="button" onClick={() => setRange(item)}>{item}</button>)}</div></header><PriceChart token={token} range={range} /><p>Development mock data · not a live price feed</p></section>
-        <section className="ps-token-social"><div className="ps-token-social-heading"><span className="ps-kicker">Market + conversation</span><h2>What people are saying</h2></div><Tabs tabs={["Posts", "Trades", "Holders"]} active={tab} onChange={setTab} label="Token activity" />{tab === "Posts" && <div className="ps-feed">{tokenPosts.map((post) => <PostCard key={post.id} post={post} />)}</div>}{tab === "Trades" && <div className="ps-activity-list">{["@ari bought 0.8 ETH", "@solreads bought 0.3 ETH", "@mayamoves sold 0.1 ETH"].map((item, index) => <span key={item}><i className={index === 2 ? "is-sell" : ""} /><strong>{item}</strong><small>{index + 2}m</small></span>)}</div>}{tab === "Holders" && <div className="ps-holder-list">{[creator, getUser("maya"), getUser("sol")].map((user, index) => <div key={user.id}><UserIdentity user={user} compact /><span>{["8.4%", "5.9%", "4.1%"][index]}</span></div>)}</div>}</section>
-      </div><aside className="ps-token-trade"><TradePanel token={token} /></aside></div>
-      {mobileTrade && <div className="ps-sheet-backdrop" onMouseDown={(event) => event.currentTarget === event.target && setMobileTrade(false)}><TradePanel token={token} mobile onClose={() => setMobileTrade(false)} /></div>}
-    </section>
-  );
+export function TokenDetail({ address }: { address: string }) {
+  const resource = useApiResource<TokenPayload>(`/api/tokens/${encodeURIComponent(address)}`); const [tab, setTab] = useState("Posts"); const [mobileTrade, setMobileTrade] = useState(false);
+  if (resource.loading) return <section className="ps-view"><div className="ps-loading-list"><i /><i /><i /></div></section>;
+  if (resource.error || !resource.data) return <section className="ps-view"><ServiceState title="Token unavailable" copy={resource.error || "This market could not be loaded."} /></section>;
+  const { token, trades, posts } = resource.data; const change = token.changeBps === null ? null : token.changeBps / 100;
+  return <section className="ps-view ps-token-view"><header className="ps-token-header"><div className="ps-token-identity"><TokenLogo token={token} size="lg" /><div><span className="ps-eyebrow">{token.pairAddress === "0x0000000000000000000000000000000000000000" ? "Native pair" : "Approved pair"}</span><h1>{token.name} <em>${token.symbol}</em></h1><p>{token.address.slice(0, 8)}…{token.address.slice(-6)}</p></div></div>{token.creator && <FollowButton profileId={token.creator.id} />}<Button className="ps-mobile-trade-open" type="button" onClick={() => setMobileTrade(true)}>Trade</Button></header><div className="ps-token-context">{token.creator ? <UserIdentity user={token.creator} compact /> : <span>Creator not linked to Ponside</span>}<span className="ps-context-divider" /><span><small>Pair</small><strong>{token.pairSymbol}</strong></span><span><small>Phase</small><strong className={token.phase === 0 ? "is-positive" : ""}>{token.phaseLabel}</strong></span></div><div className="ps-token-layout"><div className="ps-token-primary"><section className="ps-metric-strip"><div><span>Price</span><strong>{formatTokenAmount(token.priceRaw, 18)} {token.pairSymbol}</strong></div><div><span>Market Cap</span><strong>{token.marketCapUsdE18 ? `$${formatTokenAmount(token.marketCapUsdE18, 18)}` : "USD unavailable"}</strong></div><div><span>24h Volume</span><strong>{token.volumeRaw === null ? "Unavailable" : `${formatTokenAmount(token.volumeRaw, token.pairDecimals)} ${token.pairSymbol}`}</strong></div><div><span>24h</span><strong className={change === null ? "" : change >= 0 ? "is-positive" : "is-negative"}>{change === null ? "Unavailable" : `${change >= 0 ? "+" : ""}${change.toFixed(2)}%`}</strong></div></section>{token.phase === 0 && token.bondingProgressBps !== null && <section className="ps-bonding"><div><span>Bonding progress</span><strong>{(token.bondingProgressBps / 100).toFixed(2)}%</strong></div><progress value={token.bondingProgressBps} max="10000">{token.bondingProgressBps / 100}%</progress></section>}<section className="ps-chart-panel"><header><div><span>Indexed execution price</span><strong>{formatTokenAmount(token.priceRaw, 18)} {token.pairSymbol}</strong></div></header><PriceChart token={token} /></section><section className="ps-token-social"><div className="ps-token-social-heading"><span className="ps-kicker">Market + conversation</span><h2>Onchain and social activity</h2></div><Tabs tabs={["Posts", "Trades", "Holders"]} active={tab} onChange={setTab} label="Token activity" />{tab === "Posts" && <div className="ps-feed">{posts.map((post) => <PostCard key={post.id} post={post} />)}{!posts.length && <EmptyState title="No linked posts" copy="Posts explicitly linked to this token will appear here." />}</div>}{tab === "Trades" && <div className="ps-activity-list">{trades.map((trade) => <a href={`https://robinhoodchain.blockscout.com/tx/${trade.txHash}`} target="_blank" rel="noopener noreferrer" key={`${trade.txHash}-${trade.logIndex}`}><i className={trade.side === "sell" ? "is-sell" : ""} /><strong>{trade.side === "buy" ? "Buy" : "Sell"} · {formatUnits(BigInt(trade.quoteAmount), token.pairDecimals)} {token.pairSymbol}</strong><small>{new Date(trade.timestamp).toLocaleString()}</small></a>)}{!trades.length && <EmptyState title="No indexed trades" copy="Curve executions appear only when real on-chain events have been indexed." />}</div>}{tab === "Holders" && <EmptyState title="Holder ranking unavailable" copy="Ponside does not show a ranking until a complete, authoritative transfer index is configured." />}</section></div><aside className="ps-token-trade"><TradePanel token={token} /></aside></div>{mobileTrade && <div className="ps-sheet-backdrop" onMouseDown={(event) => event.currentTarget === event.target && setMobileTrade(false)}><TradePanel token={token} mobile onClose={() => setMobileTrade(false)} /></div>}</section>;
 }

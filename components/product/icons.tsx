@@ -21,7 +21,11 @@ export type IconName =
   | "check"
   | "chevron"
   | "share"
-  | "wallet";
+  | "wallet"
+  | "swap"
+  | "send"
+  | "receive"
+  | "copy";
 
 const paths: Record<IconName, React.ReactNode> = {
   home: <><path d="M3.5 10.4 12 3.5l8.5 6.9"/><path d="M5.8 9.2v11.3h12.4V9.2M9.3 20.5v-6.3h5.4v6.3"/></>,
@@ -45,6 +49,10 @@ const paths: Record<IconName, React.ReactNode> = {
   chevron: <path d="m8 10 4 4 4-4"/>,
   share: <><circle cx="18" cy="5" r="2"/><circle cx="6" cy="12" r="2"/><circle cx="18" cy="19" r="2"/><path d="m7.8 11 8.4-4.8m-8.4 6.8 8.4 4.8"/></>,
   wallet: <><path d="M4 6.5h14.5a1.5 1.5 0 0 1 1.5 1.5v10H5.5A1.5 1.5 0 0 1 4 16.5v-10Z"/><path d="M4.5 6.5 16 3.8v2.7M15 11h5v4h-5a2 2 0 0 1 0-4Z"/></>,
+  swap: <><path d="M7 7h11m-3-3 3 3-3 3"/><path d="M17 17H6m3 3-3-3 3-3"/></>,
+  send: <><path d="m4 12 16-8-6 16-3-7-7-1Z"/><path d="m11 13 4-4"/></>,
+  receive: <><path d="M12 4v11m-4-4 4 4 4-4"/><path d="M5 19h14"/></>,
+  copy: <><rect x="8" y="8" width="11" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2"/></>,
 };
 
 export function Icon({ name, ...props }: { name: IconName } & SVGProps<SVGSVGElement>) {

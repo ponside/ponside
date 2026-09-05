@@ -1,7 +1,6 @@
 export const SITE_CONFIG = {
   PROJECT_NAME: "Ponside",
-  SITE_URL: "SITE_URL_HERE",
-  X_URL: "https://x.com/ponsidedotfun",
+  SITE_URL: process.env.NEXT_PUBLIC_SITE_URL?.trim() || "",
   OG_IMAGE: "/og.png",
 } as const;
 

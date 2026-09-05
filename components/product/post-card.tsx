@@ -1,42 +1,44 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
-import type { Post } from "@/lib/mock-data";
-import { getToken, getUser, launches, positions } from "@/lib/mock-data";
+import type { SocialPost } from "@/lib/domain";
+import { apiRequest } from "@/lib/client/api";
 import { Icon } from "@/components/product/icons";
 import { Avatar } from "@/components/product/primitives";
-import { LaunchCard, MarketVisual, PositionCard, TokenCard } from "@/components/product/market-cards";
+import { useProductAuth } from "@/components/product/product-providers";
 
-export function PostCard({ post, detail = false }: { post: Post; detail?: boolean }) {
-  const user = getUser(post.userId);
-  const [liked, setLiked] = useState(Boolean(post.liked));
-  const [reposted, setReposted] = useState(false);
-  const [showReply, setShowReply] = useState(false);
-  const [bookmarked, setBookmarked] = useState(false);
+function relativeTime(value: string) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86400)}d`;
+}
 
-  return (
-    <article className={`ps-post${detail ? " is-detail" : ""}`}>
-      <div className="ps-post-avatar"><Link href={`/app/u/${user.handle}`} aria-label={`${user.name}'s profile`}><Avatar user={user} /></Link></div>
-      <div className="ps-post-content">
-        <header className="ps-post-header">
-          <Link className="ps-post-author" href={`/app/u/${user.handle}`}><strong>{user.name}</strong>{user.verified && <span className="ps-verified"><Icon name="check" /></span>}<span>@{user.handle}</span></Link>
-          <Link className="ps-post-time" href={`/app/post/${post.id}`}>· {post.timestamp}</Link>
-          <button className="ps-icon-button ps-post-more" type="button" aria-label="More post actions"><Icon name="more" /></button>
-        </header>
-        <p className="ps-post-body">{post.body}</p>
-        {post.kind === "token" && post.tokenId && <TokenCard token={getToken(post.tokenId)} />}
-        {post.kind === "position" && post.positionId && <PositionCard position={positions.find((item) => item.id === post.positionId)!} />}
-        {post.kind === "launch" && post.launchId && <LaunchCard launch={launches.find((item) => item.id === post.launchId)!} />}
-        {post.kind === "image" && <MarketVisual />}
-        <footer className="ps-post-actions">
-          <button className={showReply ? "is-active" : ""} type="button" onClick={() => setShowReply((value) => !value)} aria-label="Comment"><Icon name="comment" /><span>{post.comments}</span></button>
-          <button className={reposted ? "is-reposted" : ""} type="button" onClick={() => setReposted((value) => !value)} aria-label="Repost"><Icon name="repost" /><span>{post.reposts + (reposted ? 1 : 0)}</span></button>
-          <button className={liked ? "is-liked" : ""} type="button" onClick={() => setLiked((value) => !value)} aria-label="Like"><Icon name="heart" /><span>{post.likes + (liked && !post.liked ? 1 : liked === false && post.liked ? -1 : 0)}</span></button>
-          <button className={bookmarked ? "is-bookmarked" : ""} type="button" onClick={() => setBookmarked((value) => !value)} aria-label="Bookmark"><Icon name="bookmark" /></button>
-        </footer>
-        {showReply && <form className="ps-inline-reply" onSubmit={(event) => { event.preventDefault(); setShowReply(false); }}><input aria-label="Write a reply" placeholder="Write a reply" autoFocus /><button type="submit">Reply</button></form>}
-      </div>
-    </article>
-  );
+export function PostCard({ post, detail = false, onReply }: { post: SocialPost; detail?: boolean; onReply?: () => void }) {
+  const router = useRouter();
+  const auth = useProductAuth();
+  const [liked, setLiked] = useState(post.liked);
+  const [reposted, setReposted] = useState(post.reposted);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [removed, setRemoved] = useState(false);
+  async function relation(kind: "like" | "repost", active: boolean) {
+    if (!auth.authenticated) { auth.login(`${kind}:${post.id}`); return; }
+    setBusy(kind);
+    try {
+      const token = await auth.getToken();
+      await apiRequest(`/api/posts/${post.id}/${kind}`, { method: active ? "DELETE" : "POST" }, token);
+      if (kind === "like") setLiked(!active); else setReposted(!active);
+    } finally { setBusy(null); }
+  }
+  async function remove() {
+    if (!confirm("Delete this post?")) return;
+    setBusy("delete");
+    try { const token = await auth.getToken(); await apiRequest(`/api/posts/${post.id}`, { method: "DELETE" }, token); setRemoved(true); } finally { setBusy(null); }
+  }
+  if (removed) return null;
+  onReply ??= () => { router.push(`/post/${post.id}`); };
+  return <article className={`ps-post${detail ? " is-detail" : ""}`}><div className="ps-post-avatar"><Link href={`/u/${post.author.handle}`} aria-label={`${post.author.name}'s profile`}><Avatar user={post.author} /></Link></div><div className="ps-post-content"><header className="ps-post-header"><Link className="ps-post-author" href={`/u/${post.author.handle}`}><strong>{post.author.name}</strong><span>@{post.author.handle}</span></Link><Link className="ps-post-time" href={`/post/${post.id}`}>· {relativeTime(post.createdAt)}</Link>{post.canDelete && <button className="ps-icon-button ps-post-more" type="button" onClick={() => void remove()} disabled={busy === "delete"} aria-label="Delete post"><Icon name="close" /></button>}</header><p className="ps-post-body">{post.body}</p>{post.media.map((media) => <a className="ps-post-media" href={media.url} target="_blank" rel="noopener noreferrer" key={media.id}><span style={{ backgroundImage: `url(${JSON.stringify(media.url).slice(1, -1)})` }} role="img" aria-label="Post attachment" /></a>)}{post.tokenAddress && <Link className="ps-linked-token" href={`/token/${post.tokenAddress}`}><Icon name="coin" />View linked token <span>{post.tokenAddress.slice(0, 8)}…{post.tokenAddress.slice(-6)}</span></Link>}<footer className="ps-post-actions"><button type="button" onClick={onReply} aria-label="Reply"><Icon name="comment" /><span>{post.replies}</span></button><button className={reposted ? "is-reposted" : ""} type="button" disabled={busy === "repost"} onClick={() => void relation("repost", reposted)} aria-label="Repost"><Icon name="repost" /><span>{post.reposts + (reposted && !post.reposted ? 1 : !reposted && post.reposted ? -1 : 0)}</span></button><button className={liked ? "is-liked" : ""} type="button" disabled={busy === "like"} onClick={() => void relation("like", liked)} aria-label="Like"><Icon name="heart" /><span>{post.likes + (liked && !post.liked ? 1 : !liked && post.liked ? -1 : 0)}</span></button></footer></div></article>;
 }

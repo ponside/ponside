@@ -7,21 +7,40 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit --incremental false",
+    "test": "vitest run",
+    "validate:supabase": "node scripts/validate-supabase.mjs",
+    "indexer:health": "tsx --tsconfig scripts/tsconfig.json scripts/check-indexer-rpc.ts",
+    "indexer:status": "tsx --tsconfig scripts/tsconfig.json scripts/indexer-status.ts",
+    "indexer:discovery-status": "tsx --tsconfig scripts/tsconfig.json scripts/discovery-status.ts",
+    "indexer:initialize-forward": "tsx --tsconfig scripts/tsconfig.json scripts/initialize-forward-indexer.ts",
+    "diagnostic:indexer-bootstrap": "tsx --tsconfig scripts/tsconfig.json scripts/bootstrap-pons-indexer.ts",
+    "indexer:sync": "tsx --tsconfig scripts/tsconfig.json scripts/sync-indexer.ts",
+    "discovery:refresh": "tsx --tsconfig scripts/tsconfig.json scripts/refresh-pons-discovery.ts"
   },
   "dependencies": {
+    "@next/env": "16.3.4",
+    "@privy-io/node": "0.34.0",
+    "@privy-io/react-auth": "3.40.0",
+    "@supabase/supabase-js": "2.115.0",
     "next": "16.3.4",
+    "qrcode": "1.5.4",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "viem": "2.56.3",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "^24.0.0",
+    "@types/qrcode": "1.5.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "eslint": "^9.0.0",
     "eslint-config-next": "16.3.4",
     "tailwindcss": "4.3.3",
-    "typescript": "^5.9.0"
+    "tsx": "4.23.13",
+    "typescript": "^5.9.0",
+    "vitest": "5.0.0"
   }
 }
